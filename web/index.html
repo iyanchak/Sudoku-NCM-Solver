@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-Solving Sudoku — NCM style</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 28px 16px;
+  background: radial-gradient(1100px 700px at 50% -10%, #1c2c50 0%, #0c1224 55%, #070a14 100%);
+  color: #e8eefc;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.card { width: 520px; max-width: 100%; }
+header h1 { font-size: 26px; font-weight: 700; letter-spacing: .3px; }
+header p { margin-top: 6px; font-size: 13px; line-height: 1.5; color: #93a7cc; }
+header a { color: #6db3f2; text-decoration: none; }
+header a:hover { text-decoration: underline; }
+.board {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  padding: 9px;
+  background: #172242;
+  border-radius: 14px;
+  border: 1px solid #243356;
+  transition: box-shadow .4s, border-color .4s;
+}
+.board.win { border-color: rgba(72, 209, 160, .65); box-shadow: 0 0 36px rgba(72, 209, 160, .28); }
+.box { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0e1730;
+  color: #59d2ff;
+  font-size: clamp(15px, 4.6vw, 25px);
+  font-weight: 700;
+  border-radius: 6px;
+  transition: background .15s, color .15s;
+  user-select: none;
+  cursor: pointer;
+}
+.cell.empty { color: transparent; }
+.cell.clue { background: #1a294d; color: #f4f7ff; }
+.cell.user { color: #7ce0a3; }
+.cell.same { background: #1f2f5c; }
+.cell.conflict { background: #3e1727; color: #ff7d9c; }
+.cell.sel { box-shadow: inset 0 0 0 2px #6db3f2; }
+@keyframes pop { from { transform: scale(.25); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.cell.pop { animation: pop .24s cubic-bezier(.2,.8,.3,1.2); }
+@keyframes flash { 0% { background: #92540f; color: #ffd9a3; } 100% { background: #0e1730; color: #59d2ff; } }
+.cell.flash { animation: flash .55s ease-out; }
+.progress { margin-top: 12px; height: 4px; border-radius: 2px; background: #131c36; overflow: hidden; }
+#progFill { height: 100%; width: 0%; background: linear-gradient(90deg, #2f7cf6, #59d2ff); transition: width .25s ease-out; }
+.pad { margin-top: 12px; display: none; flex-wrap: wrap; gap: 6px; }
+.pad.show { display: flex; }
+.pbtn { position: relative; min-width: 46px; padding: 9px 4px 8px; font-size: 15px; }
+.pbtn span { position: absolute; top: 2px; right: 5px; font-size: 9.5px; font-weight: 700; color: #8fa3c8; }
+.pbtn.wide { min-width: 76px; }
+#btnClear { margin-left: auto; }
+.controls { margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+select, button {
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 9px 13px;
+  border-radius: 9px;
+  border: 1px solid #2b3c64;
+  background: #16234a;
+  color: #d9e4ff;
+  cursor: pointer;
+}
+select:hover:not(:disabled), button:hover:not(:disabled) { background: #1d2d5c; }
+select:disabled, button:disabled { opacity: .45; cursor: default; }
+button.primary { background: linear-gradient(135deg, #2f7cf6, #6d5ef0); border-color: transparent; color: #fff; }
+button.primary:hover:not(:disabled) { filter: brightness(1.12); }
+#speed { margin-left: auto; }
+.status { margin-top: 14px; min-height: 46px; }
+#statusMain { font-size: 15px; font-weight: 650; }
+#statusSub { margin-top: 4px; font-size: 12.5px; color: #93a7cc; font-variant-numeric: tabular-nums; }
+.banner { margin-top: 6px; display: none; padding: 12px 14px; border-radius: 10px; font-size: 13.5px; line-height: 1.55; }
+.banner.ok { display: block; background: rgba(52, 211, 153, .1); border: 1px solid rgba(52, 211, 153, .4); color: #7fe6b6; }
+.banner.bad { display: block; background: rgba(255, 107, 129, .1); border: 1px solid rgba(255, 107, 129, .4); color: #ff92a8; }
+footer { margin-top: 16px; font-size: 12px; line-height: 1.6; color: #7c8fb5; }
+footer b { color: #a9bcdc; }
+</style>
+</head>
+<body>
+<div class="card">
+  <header>
+    <h1>Self-Solving Sudoku</h1>
+    <p>Next-Concept Modeling style — predicts all cells in parallel, then rewrites its own output level by level.
+      <a href="https://arxiv.org/abs/2610.14162" target="_blank" rel="noopener">arXiv 2610.14162</a></p>
+  </header>
+
+  <div class="board" id="board"></div>
+  <div class="progress"><div id="progFill"></div></div>
+
+  <div id="pad" class="pad">
+    <button class="pbtn" data-d="1">1<span></span></button>
+    <button class="pbtn" data-d="2">2<span></span></button>
+    <button class="pbtn" data-d="3">3<span></span></button>
+    <button class="pbtn" data-d="4">4<span></span></button>
+    <button class="pbtn" data-d="5">5<span></span></button>
+    <button class="pbtn" data-d="6">6<span></span></button>
+    <button class="pbtn" data-d="7">7<span></span></button>
+    <button class="pbtn" data-d="8">8<span></span></button>
+    <button class="pbtn" data-d="9">9<span></span></button>
+    <button class="pbtn wide" data-d="0">Erase</button>
+    <button id="btnClear" class="pbtn wide">Clear</button>
+  </div>
+
+  <div class="controls">
+    <select id="difficulty">
+      <option value="40">Easy (40 clues)</option>
+      <option value="35">Medium (35 clues)</option>
+      <option value="30" selected>Hard (30 clues)</option>
+      <option value="inkala">Expert — Inkala 2010 (21 clues)</option>
+    </select>
+    <button id="btnGenerate" class="primary">Generate puzzle</button>
+    <button id="btnSolve" disabled>Solve (NCM-style)</button>
+    <select id="speed">
+      <option value="slow">Slow</option>
+      <option value="normal" selected>Normal</option>
+      <option value="fast">Fast</option>
+    </select>
+  </div>
+
+  <div class="status">
+    <div id="statusMain">Press Generate to create a Sudoku</div>
+    <div id="statusSub">Play it by hand, or press Solve to watch the AI</div>
+  </div>
+  <div id="banner" class="banner"></div>
+
+  <footer>
+    <b>Play manually:</b> click a cell and type 1-9 (arrows move, Backspace erases, Esc deselects) or use the
+    pad — small numbers show how many of each digit remain. Red cells clash with a row, column or box.<br>
+    <b>Or watch the AI:</b> Level 0 predicts every empty cell at once (blue), then each level re-predicts the
+    broken parts in parallel and rewrites earlier output (amber flash) — self-correction that sequential
+    "ChatGPT-style" generation cannot do. Every AI solution is verified against Knuth's Dancing Links exact-cover solver.
+  </footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const boardEl = $('board'), statusMain = $('statusMain'), statusSub = $('statusSub'),
+      banner = $('banner'), progFill = $('progFill'),
+      btnGenerate = $('btnGenerate'), btnSolve = $('btnSolve'),
+      difficulty = $('difficulty'), speed = $('speed'),
+      padEl = $('pad'), btnClear = $('btnClear');
+
+const boxes = [];
+const cells = new Array(81);
+for (let b = 0; b < 9; b++) {
+  const el = document.createElement('div');
+  el.className = 'box';
+  boardEl.appendChild(el);
+  boxes.push(el);
+}
+for (let i = 0; i < 81; i++) {
+  const r = (i / 9) | 0, c = i % 9;
+  const el = document.createElement('div');
+  el.className = 'cell empty';
+  boxes[((r / 3) | 0) * 3 + ((c / 3) | 0)].appendChild(el);
+  cells[i] = el;
+}
+
+const padBtns = new Array(10);
+for (let d = 1; d <= 9; d++) padBtns[d] = padEl.querySelector('[data-d="' + d + '"]');
+
+let puzzle = null;
+let animating = false;
+let mode = 'idle';
+let user = new Array(81).fill(0);
+let selected = -1;
+let manualStart = 0;
+
+const isManual = () => mode === 'manual';
+const speedFactor = () => ({ slow: 2.0, normal: 1.0, fast: 0.45 })[speed.value] || 1;
+const sleep = ms => new Promise(res => setTimeout(res, ms / speedFactor()));
+
+function setBusy(busy) {
+  animating = busy;
+  btnGenerate.disabled = busy;
+  btnSolve.disabled = busy || !puzzle;
+  difficulty.disabled = busy;
+  speed.disabled = busy;
+}
+
+function clearBoard() {
+  for (const el of cells) { el.className = 'cell empty'; el.textContent = ''; }
+  boardEl.classList.remove('win');
+  progFill.style.width = '0%';
+}
+
+function retrigger(el, cls) {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+}
+
+function valueAt(grid, i) {
+  const ch = grid[i];
+  return ch === '.' ? 0 : +ch;
+}
+
+function conflictsIn(grid) {
+  const set = new Set();
+  for (let i = 0; i < 81; i++) {
+    const d = valueAt(grid, i);
+    if (!d) continue;
+    const r = (i / 9) | 0, c = i % 9, br = ((r / 3) | 0) * 3, bc = ((c / 3) | 0) * 3;
+    for (let k = 0; k < 9; k++) {
+      const j1 = r * 9 + k;
+      if (j1 !== i && valueAt(grid, j1) === d) set.add(i);
+      const j2 = k * 9 + c;
+      if (j2 !== i && valueAt(grid, j2) === d) set.add(i);
+      const j3 = (br + ((k / 3) | 0)) * 9 + bc + k % 3;
+      if (j3 !== i && valueAt(grid, j3) === d) set.add(i);
+    }
+  }
+  return set;
+}
+
+function digitCounts(grid) {
+  const cnt = new Array(10).fill(0);
+  for (let i = 0; i < 81; i++) {
+    const d = valueAt(grid, i);
+    if (d) cnt[d]++;
+  }
+  return cnt;
+}
+
+function isComplete(grid) {
+  for (let i = 0; i < 81; i++) if (grid[i] === '.') return false;
+  return conflictsIn(grid).size === 0;
+}
+
+function gridString() {
+  let s = '';
+  for (let i = 0; i < 81; i++) {
+    const d = puzzle[i] !== '.' ? +puzzle[i] : user[i];
+    s += d ? String(d) : '.';
+  }
+  return s;
+}
+
+function paintConflicts(grid) {
+  const conf = conflictsIn(grid);
+  for (let i = 0; i < 81; i++) {
+    if (puzzle[i] === '.') cells[i].classList.toggle('conflict', conf.has(i));
+  }
+}
+
+function updatePad(grid) {
+  const cnt = digitCounts(grid);
+  for (let d = 1; d <= 9; d++) {
+    const left = 9 - cnt[d];
+    padBtns[d].disabled = left <= 0;
+    padBtns[d].querySelector('span').textContent = left > 0 ? left : '';
+  }
+}
+
+function paintManual() {
+  const grid = gridString();
+  const conf = conflictsIn(grid);
+  const selDigit = selected >= 0 ? valueAt(grid, selected) : 0;
+  for (let i = 0; i < 81; i++) {
+    let cls = 'cell';
+    if (puzzle[i] !== '.') cls += ' clue';
+    else if (user[i]) cls += ' user';
+    else cls += ' empty';
+    if (conf.has(i)) cls += ' conflict';
+    if (i === selected) cls += ' sel';
+    else if (selDigit && valueAt(grid, i) === selDigit) cls += ' same';
+    const d = valueAt(grid, i);
+    cells[i].textContent = d ? String(d) : '';
+    cells[i].className = cls;
+  }
+  updatePad(grid);
+  if (mode === 'manual') {
+    let remaining = 0;
+    for (let i = 0; i < 81; i++) if (grid[i] === '.') remaining++;
+    if (remaining > 0 || conf.size > 0) {
+      statusSub.textContent = conf.size
+        ? conf.size + ' conflict' + (conf.size > 1 ? 's' : '') + ' — red cells clash'
+        : remaining + ' cell' + (remaining === 1 ? '' : 's') + ' to go';
+    }
+  }
+}
+
+function entry(i, d) {
+  if (!isManual() || i < 0 || puzzle[i] !== '.') return;
+  user[i] = d;
+  const grid = gridString();
+  const complete = isComplete(grid);
+  if (complete) selected = -1;
+  paintManual();
+  if (complete) {
+    mode = 'done';
+    boardEl.classList.add('win');
+    banner.className = 'banner ok';
+    const secs = ((Date.now() - manualStart) / 1000).toFixed(1);
+    banner.innerHTML = 'You solved it manually in <b>' + secs + ' s</b> — every row, column and box valid.';
+    statusMain.textContent = 'Solved by hand';
+    statusSub.textContent = '';
+  }
+}
+
+boardEl.addEventListener('click', e => {
+  const idx = cells.indexOf(e.target);
+  if (idx < 0 || !isManual()) return;
+  selected = selected === idx ? -1 : idx;
+  paintManual();
+});
+
+document.addEventListener('keydown', e => {
+  if (!isManual()) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if (t && (t.tagName === 'SELECT' || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+  if (e.key >= '1' && e.key <= '9') {
+    entry(selected, +e.key);
+    e.preventDefault();
+  } else if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') {
+    entry(selected, 0);
+    e.preventDefault();
+  } else if (e.key === 'Escape') {
+    selected = -1;
+    paintManual();
+  } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    if (selected < 0) selected = 40;
+    else {
+      let r = (selected / 9) | 0, c = selected % 9;
+      if (e.key === 'ArrowUp') r = (r + 8) % 9;
+      if (e.key === 'ArrowDown') r = (r + 1) % 9;
+      if (e.key === 'ArrowLeft') c = (c + 8) % 9;
+      if (e.key === 'ArrowRight') c = (c + 1) % 9;
+      selected = r * 9 + c;
+    }
+    paintManual();
+    e.preventDefault();
+  }
+});
+
+padEl.addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn || !isManual()) return;
+  if (btn.dataset.d) entry(selected, +btn.dataset.d);
+});
+
+btnClear.addEventListener('click', () => {
+  if (!isManual()) return;
+  user.fill(0);
+  selected = -1;
+  paintManual();
+});
+
+async function generate() {
+  if (animating) return;
+  setBusy(true);
+  mode = 'idle';
+  selected = -1;
+  padEl.classList.remove('show');
+  banner.className = 'banner';
+  statusMain.textContent = 'Generating a unique-solution puzzle...';
+  statusSub.textContent = '';
+  try {
+    const url = difficulty.value === 'inkala'
+      ? '/api/generate?inkala=true'
+      : '/api/generate?clues=' + difficulty.value;
+    const res = await fetch(url);
+    const data = await res.json();
+    puzzle = data.puzzle;
+    user = new Array(81).fill(0);
+    clearBoard();
+    statusMain.textContent = data.name;
+    statusSub.textContent = data.genMillis != null
+      ? 'Generated in ' + data.genMillis + ' ms, uniqueness checked with DLX'
+      : 'The famous Inkala 2010 board, once billed as the world\u2019s hardest sudoku';
+    for (let i = 0; i < 81; i++) {
+      if (puzzle[i] !== '.') {
+        cells[i].textContent = puzzle[i];
+        cells[i].className = 'cell clue';
+        retrigger(cells[i], 'pop');
+        await sleep(26);
+      }
+    }
+    mode = 'manual';
+    manualStart = Date.now();
+    padEl.classList.add('show');
+    paintManual();
+    statusSub.textContent = 'Your move — click a cell and type 1-9, or press Solve to watch the AI';
+  } catch (e) {
+    statusMain.textContent = 'Generation failed: ' + e;
+    puzzle = null;
+    mode = 'idle';
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function solve() {
+  if (animating || !puzzle) return;
+  setBusy(true);
+  mode = 'animating';
+  selected = -1;
+  padEl.classList.remove('show');
+  banner.className = 'banner';
+  try {
+    statusMain.textContent = 'Solving: parallel predict, then self-correcting levels...';
+    statusSub.textContent = '';
+    const res = await fetch('/api/solve', { method: 'POST', body: puzzle });
+    const data = await res.json();
+    if (data.error) {
+      statusMain.textContent = 'Error: ' + data.error;
+      mode = 'idle';
+      return;
+    }
+    const traj = data.trajectory;
+    if (!traj.length) {
+      statusMain.textContent = 'Solver returned no levels';
+      mode = 'idle';
+      return;
+    }
+
+    statusMain.textContent = 'Level 0 — parallel predict (all 81 cells at once)';
+    const g0 = traj[0].grid;
+    for (let i = 0; i < 81; i++) {
+      if (puzzle[i] === '.') {
+        cells[i].textContent = g0[i];
+        cells[i].className = 'cell pred';
+        retrigger(cells[i], 'pop');
+        await sleep(14);
+      }
+    }
+    paintConflicts(g0);
+    statusSub.textContent = traj[0].conflicts + ' conflicts in the sketch';
+    progFill.style.width = (100 / Math.max(1, traj.length - 1)) + '%';
+    await sleep(420);
+
+    let prev = g0;
+    for (let k = 1; k < traj.length; k++) {
+      const g = traj[k].grid;
+      const changed = [];
+      for (let i = 0; i < 81; i++) {
+        if (puzzle[i] === '.' && g[i] !== prev[i]) changed.push(i);
+      }
+      progFill.style.width = (100 * k / Math.max(1, traj.length - 1)) + '%';
+      if (!changed.length && traj[k].conflicts === traj[k - 1].conflicts) {
+        await sleep(70);
+        prev = g;
+        continue;
+      }
+      statusMain.textContent = 'Level ' + k + ' — parallel self-correction';
+      for (const i of changed) {
+        cells[i].textContent = g[i];
+        cells[i].className = 'cell pred';
+        retrigger(cells[i], 'flash');
+        await sleep(85);
+      }
+      paintConflicts(g);
+      statusSub.textContent = traj[k].conflicts === 0
+        ? '0 conflicts — solved'
+        : traj[k].conflicts + ' conflicts remain' + (changed.length ? ' — ' + changed.length + ' cells rewritten' : '');
+      prev = g;
+      if (traj[k].conflicts > 0) await sleep(260);
+    }
+
+    if (data.solved) {
+      mode = 'done';
+      boardEl.classList.add('win');
+      banner.className = 'banner ok';
+      banner.innerHTML = 'Solved in <b>' + data.levels + ' levels</b>' +
+        (data.restarts ? ' (' + data.restarts + ' restarts)' : '') +
+        ' — verified against DLX ground truth in ' + data.dlxMicros + ' \u00b5s.<br>' +
+        'A sequential AR-style solver on this board: ' +
+        (data.arSolved ? 'solved (it got lucky).' : 'failed — it can never go back and fix its own output.');
+      statusMain.textContent = 'Solved';
+      statusSub.textContent = '';
+    } else {
+      mode = 'idle';
+      banner.className = 'banner bad';
+      banner.textContent = 'Not solved within budget — generate another board.';
+      statusMain.textContent = 'Not solved';
+    }
+  } catch (e) {
+    statusMain.textContent = 'Solve failed: ' + e;
+    mode = 'idle';
+  } finally {
+    setBusy(false);
+  }
+}
+
+btnGenerate.addEventListener('click', generate);
+btnSolve.addEventListener('click', solve);
+</script>
+</body>
+</html>

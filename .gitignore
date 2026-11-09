@@ -1,0 +1,55 @@
+### Java ###
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+
+### Build output ###
+out/
+build/
+bin/
+target/
+.metadata/
+
+### IntelliJ IDEA ###
+.idea/
+*.iml
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+.history/
+
+### OS ###
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+### Logs / temp ###
+*.log
+*.tmp
+*.bak
+*.swp
+~$*
